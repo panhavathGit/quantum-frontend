@@ -18,6 +18,8 @@ function App() {
   const messagesEndRef = useRef(null);
 
   const BASE_URL = 'http://localhost:3001';
+
+  
   useEffect(() => {
     socket.on('connect', () => {
       console.log('Connected to chat');
