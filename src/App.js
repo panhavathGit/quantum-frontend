@@ -17,6 +17,7 @@ function App() {
   const [encryptedInput, setEncryptedInput] = useState('');
   const messagesEndRef = useRef(null);
 
+  const BASE_URL = 'http://localhost:3001';
   useEffect(() => {
     socket.on('connect', () => {
       console.log('Connected to chat');
@@ -88,7 +89,7 @@ function App() {
     }
 
     try {
-      const response = await axios.post('http://localhost:3001/api/encrypt', {
+      const response = await axios.post(`${BASE_URL}/api/encrypt`, {
         message: encryptMessage,
         key: sharedKey
       });
@@ -119,7 +120,7 @@ function App() {
     }
 
     try {
-      const response = await axios.post('http://localhost:3001/api/decrypt', {
+      const response = await axios.post(`${BASE_URL}/api/decrypt`, {
         encrypted: encryptedInput,
         key: sharedKey
       });
@@ -185,7 +186,7 @@ function App() {
             Join Chat
           </button>
           
-          <div className="instructions">
+          {/* <div className="instructions">
             <h3>🎯 Demo Instructions:</h3>
             <ol>
               <li><strong>Terminal:</strong> Run <code>python quantum-keygen.py</code></li>
@@ -194,7 +195,7 @@ function App() {
               <li><strong>New window:</strong> Repeat steps 1-3 as Bob</li>
               <li><strong>Chat:</strong> Use Encrypt/Decrypt buttons</li>
             </ol>
-          </div>
+          </div> */}
         </div>
       </div>
     );
