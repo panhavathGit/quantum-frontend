@@ -11,11 +11,20 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [sharedKey, setSharedKey] = useState('');
-  const [showEncryptModal, setShowEncryptModal] = useState(false);
-  const [encryptMessage, setEncryptMessage] = useState('');
-  const [showDecryptModal, setShowDecryptModal] = useState(false);
-  const [encryptedInput, setEncryptedInput] = useState('');
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [decryptKey, setDecryptKey] = useState('');
+  const [notification, setNotification] = useState('');
+  const [showNotification, setShowNotification] = useState(false);
   const messagesEndRef = useRef(null);
+
+  const showPopup = (message) => {
+    setNotification(message);
+    setShowNotification(true);
+    setTimeout(() => {
+      setShowNotification(false);
+    }, 3000);
+  };
 
   useEffect(() => {
     socket.on('connect', () => {
@@ -24,7 +33,7 @@ function App() {
 
     socket.on('joined', (data) => {
       setIsConnected(true);
-      alert(`Welcome ${data.username}! ${data.hasKey ? 'Key loaded' : 'No key set'}`);
+      showPopup(`Welcome ${data.username}! ${data.hasKey ? 'Key loaded' : 'No key set'}`);
     });
 
     socket.on('new-message', (message) => {
@@ -56,83 +65,98 @@ function App() {
 
   const joinChat = () => {
     if (!username.trim()) {
-      alert('Enter username');
+      showPopup('Enter username');
       return;
     }
     
     socket.emit('join', { username, key: sharedKey });
   };
 
-  const sendMessage = () => {
+  const sendMessage = (encrypted = false) => {
     if (!message.trim()) return;
     
-    socket.emit('send-message', {
-      text: message,
-      encrypted: false
-    });
-    
-    setMessage('');
-  };
+    if (encrypted && !sharedKey.trim()) {
+      showPopup('Set quantum key first to encrypt messages');
+      return;
+    }
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
+    if (encrypted) {
+      handleEncrypt();
+    } else {
+      socket.emit('send-message', {
+        text: message,
+        encrypted: false
+      });
+      setMessage('');
     }
   };
 
   const handleEncrypt = async () => {
-    if (!encryptMessage.trim() || !sharedKey.trim()) {
-      alert('Enter message and set quantum key first');
+    if (!message.trim() || !sharedKey.trim()) {
+      showPopup('Enter message and set quantum key first');
       return;
     }
 
     try {
       const response = await axios.post('http://localhost:3001/api/encrypt', {
-        message: encryptMessage,
+        message: message,
         key: sharedKey
       });
 
       if (response.data.success) {
-        // Send encrypted message
-        socket.emit('send-message', {
-          text: `🔐 ENCRYPTED MESSAGE\n${response.data.encrypted_hex.substring(0, 80)}...\n[Use Decrypt button to view]`,
+           socket.emit('send-message', {
+          text: `🔐 ENCRYPTED MESSAGE\n${response.data.encrypted_hex.substring(0, 80)}...\n[Click to decrypt]`,
           encrypted: true,
           encryptedHex: response.data.encrypted_hex
         });
         
-        setEncryptMessage('');
-        setShowEncryptModal(false);
-        alert('✅ Message encrypted and sent!');
+        setMessage('');
       } else {
-        alert(`Encryption failed: ${response.data.error}`);
+        showPopup(`Encryption failed: ${response.data.error}`);
       }
     } catch (error) {
-      alert('Encryption service not running. Start python service first.');
+      showPopup('Encryption service not running. Start python service first.');
+    }
+  };
+
+  const handleMessageClick = (msg) => {
+    if (msg.encrypted) {
+      setSelectedMessage(msg);
+      setShowKeyModal(true);
+      setDecryptKey(sharedKey);
     }
   };
 
   const handleDecrypt = async () => {
-    if (!encryptedInput.trim() || !sharedKey.trim()) {
-      alert('Enter encrypted text and set quantum key first');
-      return;
-    }
+    if (!decryptKey.trim() || !selectedMessage) return;
 
     try {
       const response = await axios.post('http://localhost:3001/api/decrypt', {
-        encrypted: encryptedInput,
-        key: sharedKey
+        encrypted: selectedMessage.encryptedHex,
+        key: decryptKey
       });
 
       if (response.data.success) {
-        alert(`✅ DECRYPTED MESSAGE:\n\n"${response.data.decrypted_message}"`);
-        setShowDecryptModal(false);
-        setEncryptedInput('');
+        // Update the message in the messages array to show decrypted content
+        setMessages(prev => prev.map(msg => 
+          msg.id === selectedMessage.id 
+            ? {
+                ...msg, 
+                text: `🔓 DECRYPTED: ${response.data.decrypted_message}`,
+                encrypted: false,
+                decrypted: true
+              }
+            : msg
+        ));
+        
+        setShowKeyModal(false);
+        setSelectedMessage(null);
+        setDecryptKey('');
       } else {
-        alert(`Decryption failed: ${response.data.error}`);
+        showPopup(`Decryption failed: ${response.data.error}`);
       }
     } catch (error) {
-      alert('Decryption service not running.');
+      showPopup('Decryption service not running.');
     }
   };
 
@@ -147,53 +171,57 @@ function App() {
     try {
       const text = await navigator.clipboard.readText();
       setSharedKey(text.trim());
-      alert('✅ Key pasted!');
+      showPopup('✅ Key pasted!');
     } catch (err) {
-      alert('Cannot read clipboard');
+      showPopup('Cannot read clipboard');
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
     }
   };
 
   if (!isConnected) {
     return (
       <div className="login-container">
-        <div className="login-box">
-          <h1>🔐 Quantum Secure Chat</h1>
-          
-          <input
-            type="text"
-            placeholder="Username (Alice or Bob)"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="username-input"
-          />
-          
-          <div className="key-section">
-            <h3>🔑 Paste Quantum Key</h3>
-            <textarea
-              value={sharedKey}
-              onChange={(e) => setSharedKey(e.target.value)}
-              placeholder="Paste key from terminal here..."
-              rows="3"
-              className="key-input"
-            />
-            <button onClick={handlePasteKey} className="paste-btn">
-              📋 Paste from Clipboard
-            </button>
-          </div>
-          
-          <button onClick={joinChat} className="join-button">
-            Join Chat
-          </button>
-          
-          <div className="instructions">
-            <h3>🎯 Demo Instructions:</h3>
-            <ol>
-              <li><strong>Terminal:</strong> Run <code>python quantum-keygen.py</code></li>
-              <li><strong>Terminal:</strong> Generate & copy quantum key</li>
-              <li><strong>Here:</strong> Paste key & join as Alice</li>
-              <li><strong>New window:</strong> Repeat steps 1-3 as Bob</li>
-              <li><strong>Chat:</strong> Use Encrypt/Decrypt buttons</li>
-            </ol>
+        <div className="quantum-panel">
+          <div className="panel-border">
+            <div className="panel-content">
+              <h1 className="quantum-title">ENTER YOUR NAME</h1>
+              
+              <input
+                type="text"
+                placeholder="ENTER YOUR NAME..."
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="quantum-input"
+              />
+              
+              <div className="key-section">
+                <textarea
+                  value={sharedKey}
+                  onChange={(e) => setSharedKey(e.target.value)}
+                  placeholder="Paste quantum key here..."
+                  rows="3"
+                  className="quantum-key-input"
+                />
+                <button onClick={handlePasteKey} className="quantum-btn secondary">
+                  PASTE KEY
+                </button>
+              </div>
+              
+              <div className="quantum-actions">
+                <button onClick={joinChat} className="quantum-btn primary">
+                  YES
+                </button>
+                <button onClick={() => window.close()} className="quantum-btn secondary">
+                  CANCEL
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -202,101 +230,102 @@ function App() {
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <h1>🔐 Quantum Chat - {username}</h1>
-        <div className="header-buttons">
-          <button onClick={() => setShowEncryptModal(true)} className="encrypt-btn">
-            🔒 Encrypt
-          </button>
-          <button onClick={() => setShowDecryptModal(true)} className="decrypt-btn">
-            🔓 Decrypt
-          </button>
+      <header className="quantum-header">
+        <div className="header-glow">
+          <h1>QUANTUM CHAT - {username.toUpperCase()}</h1>
         </div>
       </header>
 
       <div className="chat-container">
-        <div className="messages">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`message ${msg.username === username ? 'sent' : 'received'}`}>
-              <div className="message-header">
-                <span className="sender">{msg.username}</span>
-                <span className="time">{formatTime(msg.timestamp)}</span>
-              </div>
-              <div className={`message-body ${msg.encrypted ? 'encrypted' : ''}`}>
-                {msg.text}
+        <div className="messages-panel">
+          <div className="messages">
+            {messages.map((msg) => (
+              <div 
+                key={msg.id} 
+                className={`quantum-message ${msg.username === username ? 'sent' : 'received'} ${msg.encrypted ? 'encrypted-msg' : ''}`}
+                onClick={() => handleMessageClick(msg)}
+              >
+                <div className="message-header">
+                  <span className="sender">{msg.username}</span>
+                  <span className="time">{formatTime(msg.timestamp)}</span>
+                </div>
+                <div className="message-body">
+                  {msg.text}
+                </div>
                 {msg.encrypted && (
-                  <button 
-                    className="copy-cipher"
-                    onClick={() => {
-                      navigator.clipboard.writeText(msg.encryptedHex);
-                      alert('Ciphertext copied!');
-                    }}
-                  >
-                    📋 Copy Ciphertext
-                  </button>
+                  <div className="encrypted-indicator">
+                    🔐 ENCRYPTED - CLICK TO DECRYPT
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
-        <div className="input-area">
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type message..."
-            rows="2"
-          />
-          <button onClick={sendMessage} disabled={!message.trim()}>
-            Send
-          </button>
+        <div className="input-panel">
+          <div className="input-container">
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="TYPE MESSAGE..."
+              rows="2"
+              className="quantum-message-input"
+            />
+            <div className="send-actions">
+              <button 
+                onClick={() => sendMessage(false)} 
+                disabled={!message.trim()}
+                className="quantum-btn send-normal"
+              >
+                SEND
+              </button>
+              <button 
+                onClick={() => sendMessage(true)} 
+                disabled={!message.trim()}
+                className="quantum-btn send-encrypt"
+              >
+                ENCRYPT
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Encrypt Modal */}
-      {showEncryptModal && (
-        <div className="modal">
-          <div className="modal-content">
-            <h2>🔒 Encrypt Message</h2>
-            <textarea
-              value={encryptMessage}
-              onChange={(e) => setEncryptMessage(e.target.value)}
-              placeholder="Secret message..."
-              rows="4"
-            />
-            <div className="modal-buttons">
-              <button onClick={handleEncrypt} disabled={!encryptMessage.trim()}>
-                Encrypt & Send
-              </button>
-              <button onClick={() => setShowEncryptModal(false)}>
-                Cancel
-              </button>
+      {/* Decrypt Key Modal */}
+      {showKeyModal && (
+        <div className="quantum-modal">
+          <div className="quantum-panel small">
+            <div className="panel-border">
+              <div className="panel-content">
+                <h2>ENTER DECRYPTION KEY</h2>
+                <textarea
+                  value={decryptKey}
+                  onChange={(e) => setDecryptKey(e.target.value)}
+                  placeholder="Enter key to decrypt..."
+                  rows="3"
+                  className="quantum-key-input blur-key"
+                />
+                <div className="quantum-actions">
+                  <button onClick={handleDecrypt} className="quantum-btn primary">
+                    DECRYPT
+                  </button>
+                  <button onClick={() => setShowKeyModal(false)} className="quantum-btn secondary">
+                    CANCEL
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Decrypt Modal */}
-      {showDecryptModal && (
-        <div className="modal">
-          <div className="modal-content">
-            <h2>🔓 Decrypt Message</h2>
-            <textarea
-              value={encryptedInput}
-              onChange={(e) => setEncryptedInput(e.target.value)}
-              placeholder="Paste encrypted hex..."
-              rows="4"
-            />
-            <div className="modal-buttons">
-              <button onClick={handleDecrypt} disabled={!encryptedInput.trim()}>
-                Decrypt
-              </button>
-              <button onClick={() => setShowDecryptModal(false)}>
-                Cancel
-              </button>
-            </div>
+      {/* Notification Popup */}
+      {showNotification && (
+        <div className="notification-popup">
+          <div className="notification-content">
+            {notification}
           </div>
         </div>
       )}
